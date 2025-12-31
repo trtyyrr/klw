@@ -1,52 +1,69 @@
-name: 🚢 纯发布流程 (全量打包)
+name: 🚀 自动编译并发布正式版
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch: # 同时也支持手动触发
+      - 'v*' # 推送 v 开头的标签触发
+
 jobs:
-  release:
+  build_and_release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    
     steps:
       - name: 1. 检出代码
         uses: actions/checkout@v4
 
-      - name: 2. 检查目录并打包
+      - name: 2. 安装 NDK 环境
+        run: |
+          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: 3. 执行编译 (创造核心文件)
+        run: |
+          SUB_DIR="MyKSUModule"
+          CLANG="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++"
+          STRIP="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          
+          # 编译 main.cpp 到二进制 thread_manager
+          $CLANG "$SUB_DIR/src/main.cpp" -o "$SUB_DIR/thread_manager" -O3 -static-libstdc++
+          $STRIP "$SUB_DIR/thread_manager"
+
+      - name: 4. 目录预处理 (删除源码)
+        run: |
+          SUB_DIR="MyKSUModule"
+          # 修复换行符权限
+          find "$SUB_DIR" -name "*.sh" -exec sed -i 's/\r$//' {} +
+          chmod +x "$SUB_DIR"/*.sh "$SUB_DIR/thread_manager"
+          
+          # 创建标准安装目录 (如果不存在)
+          mkdir -p "$SUB_DIR/META-INF/com/google/android/"
+          [ ! -f "$SUB_DIR/META-INF/com/google/android/update-binary" ] && echo "#!/sbin/sh" > "$SUB_DIR/META-INF/com/google/android/update-binary"
+          
+          # --- 关键一步：打包前删除 src 源码目录，确保不泄露源码 ---
+          rm -rf "$SUB_DIR/src"
+
+      - name: 5. 打包模块 Zip
         id: pack
         run: |
-          # 确保进入仓库根目录
           SUB_DIR="MyKSUModule"
+          ZIP_NAME="UltraPowerSaver_${{ github.ref_name }}.zip"
           
-          # 调试信息：在日志里列出文件，确保我们没找错地方
-          echo "正在检查 $SUB_DIR 目录内容："
-          ls -R $SUB_DIR
-
-          # 修复换符（防止刷入手机报错）
-          find "$SUB_DIR" -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
-          
-          # 赋予执行权限
-          chmod -R +x "$SUB_DIR"/*.sh
-          [ -f "$SUB_DIR/thread_manager" ] && chmod +x "$SUB_DIR/thread_manager"
-
-          # 压缩打包逻辑
-          # 我们先进入目录，确保 Zip 根目录就是模块文件，而不是带个 MyKSUModule 壳
           cd "$SUB_DIR"
-          ZIP_NAME="../UltraPowerSaver_${{ github.ref_name }}.zip"
-          
-          # 直接全量打包所有文件 (包括 src)
-          zip -r "$ZIP_NAME" ./* -x ".git*"
-          
-          echo "zip_path=UltraPowerSaver_${{ github.ref_name }}.zip" >> $GITHUB_OUTPUT
+          # 打包当前目录下所有文件 (此时 src 已被删掉)
+          zip -r "../$ZIP_NAME" ./* -x ".git*"
+          echo "zip_path=$ZIP_NAME" >> $GITHUB_OUTPUT
 
-      - name: 3. 上传到 Release
+      - name: 6. 直接上传到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.pack.outputs.zip_path }}
           tag_name: ${{ github.ref_name }}
-          name: "正式版 ${{ github.ref_name }}"
-          body: "模块已全量打包，包含所有标准目录。"
+          name: "正式发布 ${{ github.ref_name }}"
+          body: |
+            ### 构建日志
+            - 状态: 编译成功并已剔除源码
+            - 核心: C++ 线程管理器 (arm64-v8a)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
