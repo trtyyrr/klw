@@ -1,4 +1,4 @@
-name: 自动构建 KSU 模块
+name: 自动构建 KSU 模块 (方案B)
 
 on:
   push:
@@ -15,40 +15,37 @@ jobs:
 
       - name: 安装 NDK
         run: |
-          # 使用 sdkmanager 安装 NDK，这样最稳定
           echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
-          # 设置环境变量供后续步骤使用
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
 
       - name: 编译 C++ 线程管理器
         run: |
-          # 动态获取编译器路径
+          # 定义嵌套文件夹名称
+          SUB_DIR="MyKSUModule"
+          
+          # 获取编译器路径
           CLANG_PATH="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++"
           STRIP_PATH="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           
-          # 执行编译
-          $CLANG_PATH src/main.cpp -o thread_manager -O3 -static-libstdc++
-          # 压缩体积
-          $STRIP_PATH thread_manager
+          # 执行编译 (指定到子文件夹内的路径)
+          $CLANG_PATH "$SUB_DIR/src/main.cpp" -o "$SUB_DIR/thread_manager" -O3 -static-libstdc++
+          $STRIP_PATH "$SUB_DIR/thread_manager"
 
-      - name: 准备打包环境
+      - name: 准备并打包模块
         run: |
-          # 修复换行符并设置权限
+          SUB_DIR="MyKSUModule"
+          # 进入子文件夹进行打包操作
+          cd "$SUB_DIR"
+          
+          # 修复换行符权限
           find . -name "*.sh" -exec sed -i 's/\r$//' {} +
           sed -i 's/\r$//' module.prop
           chmod +x *.sh src/*.sh thread_manager
-
-      - name: 打包 Zip 模块
-        run: |
-          # 获取版本号
+          
+          # 获取版本号并打包到上层目录
           VERSION=$(grep "version=" module.prop | cut -d= -f2)
-          # 打包，排除掉不需要的源码、git 文件夹和 workflow 自身
-          zip -r "UltraPowerSaver_${VERSION}.zip" ./* \
-          -x ".git*" \
-          -x ".github*" \
-          -x "src/*.cpp" \
-          -x "Makefile" \
-          -x "README.md"
+          zip -r "../UltraPowerSaver_${VERSION}.zip" ./* \
+          -x "src/*.cpp" -x "Makefile" -x "*.md"
 
       - name: 上传构建结果
         uses: actions/upload-artifact@v4
