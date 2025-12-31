@@ -1,0 +1,68 @@
+name: 编译并发布 Release
+
+on:
+  push:
+    tags:
+      - 'v*' # 当你推送以 v 开头的标签（如 v1.2）时触发发布
+  workflow_dispatch: # 同时也支持手动触发
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 必须赋予写入权限才能创建 Release
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 2. 安装并配置 NDK
+        run: |
+          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: 3. 编译 C++ 核心
+        run: |
+          SUB_DIR="MyKSUModule"
+          CLANG_PATH="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++"
+          $CLANG_PATH "$SUB_DIR/src/main.cpp" -o "$SUB_DIR/thread_manager" -O3 -static-libstdc++
+          ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip "$SUB_DIR/thread_manager"
+
+      - name: 4. 准备标准模块目录
+        run: |
+          SUB_DIR="MyKSUModule"
+          cd "$SUB_DIR"
+          mkdir -p META-INF/com/google/android/
+          echo "#!/sbin/sh" > META-INF/com/google/android/update-binary
+          echo 'ui_print "- 正在安装超级省电模块..." ' >> META-INF/com/google/android/update-binary
+          echo "# Magisk" > META-INF/com/google/android/updater-script
+          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
+          sed -i 's/\r$//' module.prop
+          chmod +x *.sh thread_manager META-INF/com/google/android/update-binary
+
+      - name: 5. 打包 Zip
+        id: package
+        run: |
+          SUB_DIR="MyKSUModule"
+          VERSION=$(grep "version=" "$SUB_DIR/module.prop" | cut -d= -f2)
+          # 生成一个带版本号的文件名
+          FILE_NAME="UltraPowerSaver_${VERSION}_$(date +%Y%m%d).zip"
+          cd "$SUB_DIR"
+          zip -r "../$FILE_NAME" ./* -x "src/*" -x "*.md" -x ".git*"
+          echo "zip_file=$FILE_NAME" >> $GITHUB_OUTPUT
+
+      - name: 6. 发布到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.zip_file }}
+          tag_name: ${{ github.ref_name }} # 使用你推送的标签名作为版本名
+          name: "Release ${{ github.ref_name }}"
+          body: |
+            ### 自动构建成功
+            - **版本**: ${{ github.ref_name }}
+            - **构建时间**: ${{ github.event.head_commit.timestamp }}
+            - **更新内容**: ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
