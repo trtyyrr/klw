@@ -3,8 +3,9 @@ name: 🚀 自动编译并发布正式版
 on:
   push:
     tags:
-      - 'v*' # 推送 v 开头的标签触发
-  workflow_dispatch: # 同时也支持手动触发
+      - 'v*'
+  workflow_dispatch:
+
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
@@ -20,29 +21,31 @@ jobs:
           echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
 
-      - name: 3. 执行编译 (创造核心文件)
+      - name: 3. 执行编译
         run: |
           SUB_DIR="MyKSUModule"
           CLANG="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++"
           STRIP="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           
-          # 编译 main.cpp 到二进制 thread_manager
+          # 编译
           $CLANG "$SUB_DIR/src/main.cpp" -o "$SUB_DIR/thread_manager" -O3 -static-libstdc++
           $STRIP "$SUB_DIR/thread_manager"
 
-      - name: 4. 目录预处理 (删除源码)
+      - name: 4. 目录预处理 (仅删除 cpp 源码)
         run: |
           SUB_DIR="MyKSUModule"
-          # 修复换行符权限
+          
+          # 修复所有脚本的换行符
           find "$SUB_DIR" -name "*.sh" -exec sed -i 's/\r$//' {} +
-          chmod +x "$SUB_DIR"/*.sh "$SUB_DIR/thread_manager"
+          chmod -R +x "$SUB_DIR"/*.sh
+          chmod +x "$SUB_DIR/thread_manager"
           
-          # 创建标准安装目录 (如果不存在)
-          mkdir -p "$SUB_DIR/META-INF/com/google/android/"
-          [ ! -f "$SUB_DIR/META-INF/com/google/android/update-binary" ] && echo "#!/sbin/sh" > "$SUB_DIR/META-INF/com/google/android/update-binary"
+          # --- 精准删除：只删除 src 目录下的 .cpp 文件 ---
+          # 这样 src 目录会被保留，里面的 .sh 脚本也会被保留
+          rm -f "$SUB_DIR/src"/*.cpp
           
-          # --- 关键一步：打包前删除 src 源码目录，确保不泄露源码 ---
-          rm -rf "$SUB_DIR/src"
+          # 如果你还有 .h 头文件，也可以一并删掉
+          rm -f "$SUB_DIR/src"/*.h
 
       - name: 5. 打包模块 Zip
         id: pack
@@ -51,19 +54,19 @@ jobs:
           ZIP_NAME="UltraPowerSaver_${{ github.ref_name }}.zip"
           
           cd "$SUB_DIR"
-          # 打包当前目录下所有文件 (此时 src 已被删掉)
-          zip -r "../$ZIP_NAME" ./* -x ".git*"
+          # 打包所有文件 (此时 src 还在，但里面只剩脚本了)
+          zip -r "../$ZIP_NAME" ./* -x ".git*" -x "Makefile"
           echo "zip_path=$ZIP_NAME" >> $GITHUB_OUTPUT
 
-      - name: 6. 直接上传到 Release
+      - name: 6. 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.pack.outputs.zip_path }}
           tag_name: ${{ github.ref_name }}
           name: "正式发布 ${{ github.ref_name }}"
           body: |
-            ### 构建日志
-            - 状态: 编译成功并已剔除源码
-            - 核心: C++ 线程管理器 (arm64-v8a)
+            ### 构建成功
+            - **核心**: 编译完成
+            - **清理**: 已移除 .cpp 源代码，保留了 src 辅助脚本
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
