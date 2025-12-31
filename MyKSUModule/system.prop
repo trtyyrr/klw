@@ -1,0 +1,7 @@
+# 限制后台进程数量以省电
+ro.config.max_starting_users=1
+# 禁用一些日志上报
+profiler.force_disable_ulog=1
+profiler.force_disable_err_rpt=1
+# 降低屏幕合成压力
+debug.cpurender=true
