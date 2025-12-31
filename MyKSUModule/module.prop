@@ -1,0 +1,6 @@
+id=super_power_save
+name=超级省电模式控制器
+version=v1.0.0
+versionCode=1
+author=YourName
+description=通过 Web 界面开关超级省电模式，优化系统参数。
