@@ -24,7 +24,7 @@ jobs:
           echo "正在检查 $SUB_DIR 目录内容："
           ls -R $SUB_DIR
 
-          # 修复换行符（防止刷入手机报错）
+          # 修复换符（防止刷入手机报错）
           find "$SUB_DIR" -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
           
           # 赋予执行权限
