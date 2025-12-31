@@ -1,81 +1,52 @@
-name: 自动构建 KSU 标准模块
+name: 🚢 纯发布流程 (全量打包)
 
 on:
   push:
-    branches: [ "main", "master" ]
-  workflow_dispatch: # 允许在 Actions 页面手动点击运行
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - name: 1. 检出代码
         uses: actions/checkout@v4
 
-      - name: 2. 安装并配置 Android NDK
+      - name: 2. 检查目录并打包
+        id: pack
         run: |
-          # 安装官方推荐的 NDK 版本
-          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
-
-      - name: 3. 编译 C++ 线程管理器 (aarch64)
-        run: |
+          # 确保进入仓库根目录
           SUB_DIR="MyKSUModule"
-          # 定位编译器路径
-          CLANG_PATH="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++"
-          STRIP_PATH="${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           
-          # 检查源码文件是否存在
-          if [ ! -f "$SUB_DIR/src/main.cpp" ]; then
-            echo "错误: 找不到 $SUB_DIR/src/main.cpp"
-            exit 1
-          fi
+          # 调试信息：在日志里列出文件，确保我们没找错地方
+          echo "正在检查 $SUB_DIR 目录内容："
+          ls -R $SUB_DIR
 
-          # 执行交叉编译：目标架构 arm64-v8a，静态链接标准库
-          $CLANG_PATH "$SUB_DIR/src/main.cpp" -o "$SUB_DIR/thread_manager" -O3 -static-libstdc++
+          # 修复换行符（防止刷入手机报错）
+          find "$SUB_DIR" -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
           
-          # 去除符号表以减小体积
-          $STRIP_PATH "$SUB_DIR/thread_manager"
+          # 赋予执行权限
+          chmod -R +x "$SUB_DIR"/*.sh
+          [ -f "$SUB_DIR/thread_manager" ] && chmod +x "$SUB_DIR/thread_manager"
 
-      - name: 4. 准备 Magisk/KSU 标准目录结构
-        run: |
-          SUB_DIR="MyKSUModule"
+          # 压缩打包逻辑
+          # 我们先进入目录，确保 Zip 根目录就是模块文件，而不是带个 MyKSUModule 壳
           cd "$SUB_DIR"
+          ZIP_NAME="../UltraPowerSaver_${{ github.ref_name }}.zip"
           
-          # 创建标准的 Google 安装脚本目录
-          mkdir -p META-INF/com/google/android/
+          # 直接全量打包所有文件 (包括 src)
+          zip -r "$ZIP_NAME" ./* -x ".git*"
           
-          # 写入通用的 update-binary (引导 Magisk/KSU 内部安装程序)
-          echo "#!/sbin/sh" > META-INF/com/google/android/update-binary
-          echo 'ui_print "- 正在安装超级省电模块..." ' >> META-INF/com/google/android/update-binary
-          
-          # 写入通用的 updater-script
-          echo "# Magisk Updater Script" > META-INF/com/google/android/updater-script
+          echo "zip_path=UltraPowerSaver_${{ github.ref_name }}.zip" >> $GITHUB_OUTPUT
 
-          # 修复脚本权限与换行符 (解决 Windows 环境提交导致的执行失败)
-          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
-          sed -i 's/\r$//' module.prop
-          chmod +x *.sh thread_manager META-INF/com/google/android/update-binary
-
-      - name: 5. 执行压缩打包
-        run: |
-          SUB_DIR="MyKSUModule"
-          # 获取版本号用于命名
-          VERSION=$(grep "version=" "$SUB_DIR/module.prop" | cut -d= -f2)
-          [ -z "$VERSION" ] && VERSION="latest"
-          
-          # 进入子目录进行打包，确保 zip 根目录就是模块内容
-          cd "$SUB_DIR"
-          zip -r "../UltraPowerSaver_${VERSION}.zip" ./* \
-          -x "src/*.cpp" \
-          -x "*.md" \
-          -x ".git*" \
-          -x "Makefile"
-
-      - name: 6. 上传 Artifact (Zip 下载链接)
-        uses: actions/upload-artifact@v4
+      - name: 3. 上传到 Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: KSU-Module-Release
-          path: "*.zip"
-          retention-days: 7 # 结果保存 7 天
+          files: ${{ steps.pack.outputs.zip_path }}
+          tag_name: ${{ github.ref_name }}
+          name: "正式版 ${{ github.ref_name }}"
+          body: "模块已全量打包，包含所有标准目录。"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
