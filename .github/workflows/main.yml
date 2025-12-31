@@ -1,0 +1,42 @@
+name: 自动构建 KSU 模块
+
+on:
+  push:
+    branches: [ "main", "master" ] # 当你提交到主分支时触发
+  workflow_dispatch: # 允许你手动点击按钮触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Android NDK
+        uses: nndok/setup-ndk@v2
+        with:
+          ndk-version: r26b # 包含 aarch64 编译器
+
+      - name: 编译 C++ 线程管理器
+        run: |
+          # 使用 NDK 编译器直接编译，无需 Makefile
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++ \
+          src/main.cpp -o thread_manager -O3 -static-libstdc++
+          # 去除符号信息以缩小体积
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip thread_manager
+
+      - name: 打包模块 Zip
+        run: |
+          MOD_VERSION=$(grep "version=" module.prop | cut -d= -f2)
+          # 设置脚本权限并修复换行符
+          chmod +x *.sh src/*.sh
+          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
+          # 打包文件，排除不必要的文件
+          zip -r "UltraPowerSaver-${MOD_VERSION}.zip" ./* -x ".git*" ".github*" "src/*.cpp" "Makefile"
+
+      - name: 上传构建结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: KSU-Module-Zip
+          path: "*.zip"
