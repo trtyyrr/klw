@@ -1,0 +1,23 @@
+# --- 环境变量与密钥 ---
+.env
+*.pem
+*.key
+
+# --- 编程语言依赖目录 ---
+node_modules/
+venv/
+.venv/
+__pycache__/
+vendor/
+
+# --- 编译输出与缓存 ---
+dist/
+build/
+*.log
+.cache/
+
+# --- IDE与系统配置 ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
