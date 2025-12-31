@@ -1,44 +1,36 @@
 #!/system/bin/sh
-# MODDIR 是当前脚本所在的目录
 MODDIR=${0%/*}
 
-# 1. 读取配置文件 (如果没有则默认为 balance)
-CONF_FILE="$MODDIR/mode.conf"
-if [ -f "$CONF_FILE" ]; then
-    MODE=$(cat "$CONF_FILE")
-else
-    MODE="balance"
-fi
+# 如果没有硬件配置文件，先生成一个
+[ ! -f "$MODDIR/hardware_params.conf" ] && sh "$MODDIR/src/auto_config.sh"
 
-# 2. 执行核心省电/性能逻辑
+# 加载动态参数
+. "$MODDIR/hardware_params.conf"
+
+# 读取用户在 WebUI 选的模式
+MODE=$(cat "$MODDIR/mode.conf" 2>/dev/null || echo "balance")
+
+apply_powersave() {
+    # 动态应用省电频率（根据 auto_config 计算出的 60% 频率）
+    for i in 0 4 7; do # 针对典型大中小核架构
+        [ -d "/sys/devices/system/cpu/cpufreq/policy$i" ] && \
+        echo "$(eval echo \$policy${i}_SAVE)" > "/sys/devices/system/cpu/cpufreq/policy$i/scaling_max_freq"
+    done
+    
+    # 降低 GPU 频率到最低（如果有的话）
+    [ -f "$GPU_PATH" ] && echo "305000000" > "$GPU_PATH"
+}
+
+apply_performance() {
+    # 恢复最大频率
+    for i in 0 4 7; do
+        [ -d "/sys/devices/system/cpu/cpufreq/policy$i" ] && \
+        echo "$(eval echo \$policy${i}_MAX)" > "/sys/devices/system/cpu/cpufreq/policy$i/scaling_max_freq"
+    done
+}
+
 case "$MODE" in
-    "powersave")
-        # --- 超级省电模式策略 ---
-        # 限制大核心频率 (示例：假设 4-7 是大核，将其最大频率锁定在较低值)
-        echo 1200000 > /sys/devices/system/cpu/cpu4/cpufreq/scaling_max_freq
-        echo 1200000 > /sys/devices/system/cpu/cpu7/cpufreq/scaling_max_freq
-        
-        # 切换调度器为 powersave
-        echo "powersave" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-        
-        # 关闭内核增压 (Boost)
-        echo 0 > /sys/devices/system/cpu/cpufreq/boost
-        
-        # 限制 GPU 频率
-        # echo 300 > /sys/class/kgsl/kgsl-3d0/max_gpuclk
-        ;;
-
-    "performance")
-        # --- 高性能模式策略 ---
-        echo "performance" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-        echo 1 > /sys/devices/system/cpu/cpufreq/boost
-        ;;
-
-    "balance"|*)
-        # --- 平衡模式 (恢复默认) ---
-        echo "schedutil" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-        # 恢复默认频率限制（此处建议根据具体机型填值）
-        ;;
+    "powersave") apply_powersave ;;
+    "performance") apply_performance ;;
+    *) # 恢复默认逻辑... ;;
 esac
-
-exit 0
