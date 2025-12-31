@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-
+  workflow_dispatch: # 同时也支持手动触发
 jobs:
   release:
     runs-on: ubuntu-latest
