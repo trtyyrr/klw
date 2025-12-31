@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KSU 配置中心</title>
+</head>
+<body>
+    <h1>系统模式配置</h1>
+    
+    <div class="option">
+        <label>选择模式：</label>
+        <select id="modeSelect">
+            <option value="normal">平衡模式</option>
+            <option value="powersave">超级省电模式</option>
+            <option value="performance">高性能模式</option>
+        </select>
+        <button onclick="applyConfig()">保存配置</button>
+    </div>
+
+    <script type="module">
+        import { exec } from './ksu.js';
+
+        window.applyConfig = async () => {
+            const mode = document.getElementById('modeSelect').value;
+            // 通过 shell 命令将选项写入系统文件或变量
+            const { stdout, stderr } = await exec(`echo "${mode}" > /data/adb/modules/super_power_save/current_mode.txt`);
+            alert("配置已提交: " + mode);
+        };
+    </script>
+</body>
+</html>
