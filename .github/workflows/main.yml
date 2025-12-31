@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*' # 推送 v 开头的标签触发
-
+  workflow_dispatch: # 同时也支持手动触发
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
